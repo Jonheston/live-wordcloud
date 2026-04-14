@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Live Word Cloud</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+      min-height: 100vh;
+      overflow: hidden;
+      color: #fff;
+    }
+
+    .header {
+      text-align: center;
+      padding: 28px 20px 12px;
+    }
+
+    .prompt {
+      font-size: 32px;
+      font-weight: 700;
+      background: linear-gradient(135deg, #c084fc, #7c6ff7, #60a5fa);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .count {
+      font-size: 15px;
+      color: rgba(255,255,255,0.4);
+      margin-top: 6px;
+    }
+
+    #cloud {
+      position: absolute;
+      top: 120px;
+      left: 0;
+      right: 0;
+      bottom: 80px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: center;
+      align-content: center;
+      gap: 12px 20px;
+      padding: 30px 60px;
+      transition: all 0.4s;
+    }
+
+    .word {
+      display: inline-block;
+      padding: 6px 16px;
+      border-radius: 12px;
+      font-weight: 600;
+      white-space: nowrap;
+      animation: popIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+      transition: font-size 0.4s, transform 0.3s;
+      cursor: default;
+    }
+
+    .word:hover { transform: scale(1.15); }
+
+    @keyframes popIn {
+      0% { opacity: 0; transform: scale(0.3); }
+      100% { opacity: 1; transform: scale(1); }
+    }
+
+    .footer {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 20px;
+      padding: 16px;
+      background: rgba(0,0,0,0.3);
+    }
+
+    .footer img { border-radius: 8px; }
+    .footer .scan-text {
+      font-size: 18px;
+      color: rgba(255,255,255,0.7);
+    }
+
+    .waiting {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      text-align: center;
+      color: rgba(255,255,255,0.35);
+      font-size: 22px;
+    }
+
+    .waiting .dots::after {
+      content: '';
+      animation: dots 1.5s steps(4,end) infinite;
+    }
+
+    @keyframes dots {
+      0%   { content: ''; }
+      25%  { content: '.'; }
+      50%  { content: '..'; }
+      75%  { content: '...'; }
+    }
+
+    /* Admin bar (top-right) */
+    .admin {
+      position: fixed;
+      top: 12px;
+      right: 16px;
+      display: flex;
+      gap: 8px;
+      z-index: 10;
+    }
+
+    .admin button {
+      padding: 6px 14px;
+      border-radius: 8px;
+      border: 1px solid rgba(255,255,255,0.15);
+      background: rgba(255,255,255,0.08);
+      color: rgba(255,255,255,0.5);
+      font-size: 13px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .admin button:hover {
+      background: rgba(255,255,255,0.15);
+      color: #fff;
+    }
+  </style>
+</head>
+<body>
+  <div class="admin">
+    <button onclick="toggleQR()">Toggle QR</button>
+    <button onclick="resetCloud()">Reset</button>
+  </div>
+
+  <div class="header">
+    <div class="prompt" id="prompt">Loading…</div>
+    <div class="count" id="count"></div>
+  </div>
+
+  <div id="cloud">
+    <div class="waiting" id="waiting">Waiting for responses<span class="dots"></span></div>
+  </div>
+
+  <div class="footer" id="footer">
+    <img id="qr" width="64" height="64" />
+    <span class="scan-text">Scan to participate!</span>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+    const cloudEl = document.getElementById("cloud");
+    const countEl = document.getElementById("count");
+    const waitingEl = document.getElementById("waiting");
+    const qrImg = document.getElementById("qr");
+    const footerEl = document.getElementById("footer");
+
+    const COLORS = [
+      "#c084fc", "#7c6ff7", "#60a5fa", "#34d399", "#fbbf24",
+      "#f87171", "#fb923c", "#a78bfa", "#38bdf8", "#4ade80",
+      "#e879f9", "#f472b6", "#facc15", "#2dd4bf", "#818cf8",
+    ];
+
+    let colorMap = {};
+    let colorIdx = 0;
+
+    function getColor(word) {
+      if (!colorMap[word]) {
+        colorMap[word] = COLORS[colorIdx % COLORS.length];
+        colorIdx++;
+      }
+      return colorMap[word];
+    }
+
+    // Load prompt
+    fetch("/api/prompt")
+      .then((r) => r.json())
+      .then((d) => (document.getElementById("prompt").textContent = d.prompt));
+
+    // Load QR
+    fetch("/api/qr")
+      .then((r) => r.json())
+      .then((d) => (qrImg.src = d.qr));
+
+    function renderCloud(words) {
+      const entries = Object.entries(words).sort((a, b) => b[1] - a[1]);
+      const totalResponses = entries.reduce((s, [, c]) => s + c, 0);
+
+      if (entries.length === 0) {
+        waitingEl.style.display = "block";
+        countEl.textContent = "";
+        return;
+      }
+
+      waitingEl.style.display = "none";
+      countEl.textContent = `${totalResponses} response${totalResponses !== 1 ? "s" : ""} · ${entries.length} unique word${entries.length !== 1 ? "s" : ""}`;
+
+      const maxCount = entries[0][1];
+      const minSize = 20;
+      const maxSize = 80;
+
+      // Preserve existing elements, add new ones
+      const existing = {};
+      cloudEl.querySelectorAll(".word").forEach((el) => {
+        existing[el.dataset.word] = el;
+      });
+
+      entries.forEach(([word, count]) => {
+        const size = maxCount === 1
+          ? 40
+          : minSize + ((count - 1) / (maxCount - 1)) * (maxSize - minSize);
+
+        if (existing[word]) {
+          existing[word].style.fontSize = size + "px";
+          existing[word].textContent = word;
+          delete existing[word];
+        } else {
+          const span = document.createElement("span");
+          span.className = "word";
+          span.dataset.word = word;
+          span.textContent = word;
+          span.style.fontSize = size + "px";
+          span.style.color = getColor(word);
+          span.style.background = getColor(word) + "18";
+          cloudEl.appendChild(span);
+        }
+      });
+
+      // Remove words that no longer exist (after reset)
+      Object.values(existing).forEach((el) => el.remove());
+    }
+
+    socket.on("words", renderCloud);
+
+    // Admin helpers
+    function toggleQR() {
+      footerEl.style.display = footerEl.style.display === "none" ? "flex" : "none";
+    }
+
+    function resetCloud() {
+      if (confirm("Clear all words?")) {
+        fetch("/api/reset", { method: "POST" });
+        colorMap = {};
+        colorIdx = 0;
+      }
+    }
+  </script>
+</body>
+</html>

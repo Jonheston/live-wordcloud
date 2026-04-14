@@ -1,0 +1,15 @@
+{
+  "name": "live-wordcloud",
+  "version": "1.0.0",
+  "description": "Real-time word cloud — scan a QR code, submit a word, see it live on screen",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "socket.io": "^4.7.4",
+    "qrcode": "^1.5.3"
+  }
+}
