@@ -20,6 +20,11 @@ const words = {};
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
+// Route /display to display.html
+app.get("/display", (_req, res) => {
+  res.sendFile(path.join(__dirname, "public", "display.html"));
+});
+
 // --- API ---
 
 // Submit a word
